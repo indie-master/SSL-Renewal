@@ -5,11 +5,11 @@ load_config() {
   [[ -f "$cfg" ]] || { echo "Config not found: $cfg" >&2; return 1; }
   # shellcheck disable=SC1090
   source "$cfg"
-  export ROLE APP_DIR ETC_DIR PRIMARY_DOMAIN TARGET_DIR CERT_DIR LOG_DIR TELEGRAM_ENABLED TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID DEVELOPER_NAME DEVELOPER_GITHUB NODES_FILE DNS_PROPAGATION_SECONDS CLOUDFLARE_CREDENTIALS REGION_WILDCARDS_CSV
+  export ROLE APP_DIR ETC_DIR PRIMARY_DOMAIN TARGET_DIR CERT_DIR LOG_DIR TELEGRAM_ENABLED TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID NODES_FILE DNS_PROPAGATION_SECONDS CLOUDFLARE_CREDENTIALS REGION_WILDCARDS_CSV
 }
 
 banner() {
-cat <<'EOF'
+cat <<'BANNER'
    _____ _____ _        ____                              _
   / ____/ ____| |      |  _ \                            | |
  | (___| (___ | |      | |_) |___ _ __   _____      ____| |
@@ -17,8 +17,8 @@ cat <<'EOF'
   ____) |___) | |____  | |_) |  __/ | | |  __/\ V  V / (_| |
  |_____/_____/|______| |____/ \___|_| |_|\___| \_/\_/ \__,_|
 
- SSL Renewal  |  Developer: Indie_Master  |  https://github.com/indie-master
-EOF
+ SSL Renewal Toolkit
+BANNER
 }
 
 log() {
@@ -54,7 +54,7 @@ detect_certbot_service_unit() {
 }
 
 show_paths() {
-  cat <<EOF
+  cat <<EOF2
 ROLE=${ROLE:-unknown}
 APP_DIR=${APP_DIR:-}
 ETC_DIR=${ETC_DIR:-}
@@ -64,7 +64,7 @@ CERT_DIR=${CERT_DIR:-}
 NODES_FILE=${NODES_FILE:-}
 LOG_DIR=${LOG_DIR:-}
 CLOUDFLARE_CREDENTIALS=${CLOUDFLARE_CREDENTIALS:-}
-EOF
+EOF2
 }
 
 doctor_main() {
@@ -75,6 +75,10 @@ doctor_main() {
   [[ -f "${CERT_DIR}/privkey.pem" ]] || { log "Missing ${CERT_DIR}/privkey.pem"; ok=0; }
   [[ -f "${NODES_FILE}" ]] || { log "Missing ${NODES_FILE}"; ok=0; }
   [[ -f "${CLOUDFLARE_CREDENTIALS}" ]] || { log "Missing ${CLOUDFLARE_CREDENTIALS}"; ok=0; }
+  if [[ -f "${CLOUDFLARE_CREDENTIALS}" ]] && grep -Eq "PUT_YOUR_TOKEN_HERE|YOUR_TOKEN" "${CLOUDFLARE_CREDENTIALS}"; then
+    log "Cloudflare token file still contains placeholder value"
+    ok=0
+  fi
   local timer
   timer="$(detect_certbot_timer_unit)"
   [[ -n "$timer" ]] || { log "No certbot timer found"; ok=0; }
