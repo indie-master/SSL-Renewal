@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# shellcheck disable=SC1091
-source /opt/ssl-renewal/lib.sh
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f /opt/ssl-renewal/lib.sh ]]; then
+  # shellcheck disable=SC1091
+  source /opt/ssl-renewal/lib.sh
+elif [[ -f "${SELF_DIR}/lib.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SELF_DIR}/lib.sh"
+else
+  echo "lib.sh not found (checked /opt/ssl-renewal/lib.sh and ${SELF_DIR}/lib.sh)" >&2
+  exit 1
+fi
 load_config
 
 [[ "${ROLE}" == "main" ]] || { echo "deploy-certs.sh запускается только на main." >&2; exit 1; }

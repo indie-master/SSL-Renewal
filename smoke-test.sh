@@ -4,8 +4,37 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
 echo "Running bash syntax checks..."
-for f in install.sh scripts/*.sh scripts/ssl-renewal; do
+bash -n install.sh
+bash -n bootstrap.sh
+bash -n smoke-test.sh
+for f in scripts/*.sh; do
   echo "  bash -n $f"
   bash -n "$f"
 done
-echo "Syntax checks passed."
+bash -n scripts/ssl-renewal
+
+echo "Running pre-install CLI checks..."
+help_output="$(bash scripts/ssl-renewal help)"
+cloudflare_output="$(bash scripts/ssl-renewal cloudflare-help)"
+[[ "$help_output" == *"Usage:"* ]] || { echo "help output validation failed" >&2; exit 1; }
+[[ "$cloudflare_output" == *"Cloudflare API Token quick guide:"* ]] || { echo "cloudflare-help output validation failed" >&2; exit 1; }
+[[ "$help_output" != *"lib.sh not found"* ]] || { echo "help hit lib.sh load error" >&2; exit 1; }
+[[ "$cloudflare_output" != *"lib.sh not found"* ]] || { echo "cloudflare-help hit lib.sh load error" >&2; exit 1; }
+
+echo "Checking executable bits..."
+for f in install.sh smoke-test.sh scripts/*.sh scripts/ssl-renewal bootstrap.sh; do
+  [[ -x "$f" ]] || echo "  WARN: not executable: $f"
+done
+
+echo "Checking repository sanitization markers..."
+MARKER_REGEX='DEVELOPER_[A-Z_]+|[[:alnum:]._-]+\.ru'
+if command -v rg >/dev/null 2>&1; then
+  if rg -n "$MARKER_REGEX" README.md docs install.sh scripts bootstrap.sh; then
+    echo "Found disallowed/private markers" >&2
+    exit 1
+  fi
+else
+  echo "WARN: rg not found; skipping sanitization marker scan"
+fi
+
+echo "Smoke test finished."

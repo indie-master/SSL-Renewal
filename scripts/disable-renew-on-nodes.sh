@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# shellcheck disable=SC1091
-source /opt/ssl-renewal/lib.sh
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f /opt/ssl-renewal/lib.sh ]]; then
+  # shellcheck disable=SC1091
+  source /opt/ssl-renewal/lib.sh
+elif [[ -f "${SELF_DIR}/lib.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SELF_DIR}/lib.sh"
+else
+  echo "lib.sh not found (checked /opt/ssl-renewal/lib.sh and ${SELF_DIR}/lib.sh)" >&2
+  exit 1
+fi
 load_config
 
 [[ "${ROLE}" == "main" ]] || { echo "disable-renew-on-nodes.sh runs only on main." >&2; exit 1; }
-
 [[ -f "${NODES_FILE}" ]] || { echo "Nodes file not found: ${NODES_FILE}" >&2; exit 1; }
 
 while IFS= read -r NODE || [[ -n "$NODE" ]]; do
@@ -15,7 +23,7 @@ while IFS= read -r NODE || [[ -n "$NODE" ]]; do
   echo "==> ${NODE}"
   ssh -n "$NODE" "
     mkdir -p /etc/ssl-renewal /opt/ssl-renewal/logs &&
-    test -f /etc/ssl-renewal/config.env || cat > /etc/ssl-renewal/config.env <<'EOF'
+    test -f /etc/ssl-renewal/config.env || cat > /etc/ssl-renewal/config.env <<'EOFCFG'
 ROLE=\"node\"
 APP_DIR=\"/opt/ssl-renewal\"
 ETC_DIR=\"/etc/ssl-renewal\"
@@ -24,9 +32,7 @@ TARGET_DIR=\"${TARGET_DIR}\"
 CERT_DIR=\"${TARGET_DIR}\"
 LOG_DIR=\"/opt/ssl-renewal/logs\"
 TELEGRAM_ENABLED=\"0\"
-DEVELOPER_NAME=\"Indie_Master\"
-DEVELOPER_GITHUB=\"https://github.com/indie-master\"
-EOF
+EOFCFG
     systemctl disable --now certbot.timer 2>/dev/null || true
     systemctl disable --now snap.certbot.renew.timer 2>/dev/null || true
     systemctl mask certbot.service certbot.timer 2>/dev/null || true

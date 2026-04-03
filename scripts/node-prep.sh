@@ -2,6 +2,7 @@
 set -euo pipefail
 
 CONFIG="/etc/ssl-renewal/config.env"
+[[ -f "$CONFIG" ]] || { echo "Missing config: $CONFIG" >&2; exit 1; }
 # shellcheck disable=SC1090
 source "$CONFIG"
 
