@@ -11,7 +11,7 @@ GitHub: https://github.com/indie-master
 - stores certs at:
 
 ```bash
-/etc/letsencrypt/live/swiftlessvpn.ru/
+/etc/letsencrypt/live/domain.com/
 ```
 
 - pushes `fullchain.pem` and `privkey.pem` to all nodes over SSH
@@ -77,12 +77,12 @@ The installer will:
 
 Example for your case:
 
-- `swiftlessvpn.ru`
-- `*.swiftlessvpn.ru`
-- `*.de.swiftlessvpn.ru`
-- `*.msk.swiftlessvpn.ru`
-- `*.sk.swiftlessvpn.ru`
-- `*.us.swiftlessvpn.ru`
+- `domain.com`
+- `*.domain.comu`
+- `*.de.domain.com`
+- `*.msk.domain.com`
+- `*.sk.domain.com`
+- `*.us.domain.com`
 
 The script builds this from the primary domain plus a comma-separated region list.
 
