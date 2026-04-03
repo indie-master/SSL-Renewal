@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+
+load_config() {
+  local cfg="/etc/ssl-renewal/config.env"
+  [[ -f "$cfg" ]] || { echo "Config not found: $cfg" >&2; return 1; }
+  # shellcheck disable=SC1090
+  source "$cfg"
+  export ROLE APP_DIR ETC_DIR PRIMARY_DOMAIN TARGET_DIR CERT_DIR LOG_DIR TELEGRAM_ENABLED TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID DEVELOPER_NAME DEVELOPER_GITHUB NODES_FILE DNS_PROPAGATION_SECONDS CLOUDFLARE_CREDENTIALS REGION_WILDCARDS_CSV
+}
+
+banner() {
+cat <<'EOF'
+   _____ _____ _        ____                              _
+  / ____/ ____| |      |  _ \                            | |
+ | (___| (___ | |      | |_) |___ _ __   _____      ____| |
+  \___ \\___ \| |      |  _ </ _ \ '_ \ / _ \ \ /\ / / _` |
+  ____) |___) | |____  | |_) |  __/ | | |  __/\ V  V / (_| |
+ |_____/_____/|______| |____/ \___|_| |_|\___| \_/\_/ \__,_|
+
+ SSL Renewal  |  Developer: Indie_Master  |  https://github.com/indie-master
+EOF
+}
+
+log() {
+  mkdir -p "${LOG_DIR:-/opt/ssl-renewal/logs}"
+  echo "[$(date '+%F %T')] $*" | tee -a "${LOG_DIR:-/opt/ssl-renewal/logs}/ssl-renewal.log"
+}
+
+notify_tg() {
+  local message="${1:-}"
+  [[ "${TELEGRAM_ENABLED:-0}" == "1" ]] || return 0
+  [[ -x "${APP_DIR}/telegram-notify.sh" ]] || return 0
+  "${APP_DIR}/telegram-notify.sh" "$message" || true
+}
+
+detect_certbot_timer_unit() {
+  if systemctl list-unit-files | grep -q '^snap\.certbot\.renew\.timer'; then
+    echo "snap.certbot.renew.timer"
+  elif systemctl list-unit-files | grep -q '^certbot\.timer'; then
+    echo "certbot.timer"
+  else
+    echo ""
+  fi
+}
+
+detect_certbot_service_unit() {
+  if systemctl list-unit-files | grep -q '^snap\.certbot\.renew\.service'; then
+    echo "snap.certbot.renew.service"
+  elif systemctl list-unit-files | grep -q '^certbot\.service'; then
+    echo "certbot.service"
+  else
+    echo ""
+  fi
+}
+
+show_paths() {
+  cat <<EOF
+ROLE=${ROLE:-unknown}
+APP_DIR=${APP_DIR:-}
+ETC_DIR=${ETC_DIR:-}
+PRIMARY_DOMAIN=${PRIMARY_DOMAIN:-}
+TARGET_DIR=${TARGET_DIR:-}
+CERT_DIR=${CERT_DIR:-}
+NODES_FILE=${NODES_FILE:-}
+LOG_DIR=${LOG_DIR:-}
+CLOUDFLARE_CREDENTIALS=${CLOUDFLARE_CREDENTIALS:-}
+EOF
+}
+
+doctor_main() {
+  local ok=1
+  command -v certbot >/dev/null 2>&1 || { log "certbot not found"; ok=0; }
+  certbot plugins 2>/dev/null | grep -q dns-cloudflare || { log "dns-cloudflare plugin not found"; ok=0; }
+  [[ -f "${CERT_DIR}/fullchain.pem" ]] || { log "Missing ${CERT_DIR}/fullchain.pem"; ok=0; }
+  [[ -f "${CERT_DIR}/privkey.pem" ]] || { log "Missing ${CERT_DIR}/privkey.pem"; ok=0; }
+  [[ -f "${NODES_FILE}" ]] || { log "Missing ${NODES_FILE}"; ok=0; }
+  [[ -f "${CLOUDFLARE_CREDENTIALS}" ]] || { log "Missing ${CLOUDFLARE_CREDENTIALS}"; ok=0; }
+  local timer
+  timer="$(detect_certbot_timer_unit)"
+  [[ -n "$timer" ]] || { log "No certbot timer found"; ok=0; }
+  [[ "$ok" -eq 1 ]]
+}
+
+doctor_node() {
+  local ok=1
+  command -v nginx >/dev/null 2>&1 || { log "nginx not found"; ok=0; }
+  [[ -d "${TARGET_DIR}" ]] || { log "Missing target dir ${TARGET_DIR}"; ok=0; }
+  [[ "$ok" -eq 1 ]]
+}
+
+run_issue() {
+  local -a cmd
+  cmd=(certbot certonly --cert-name "${PRIMARY_DOMAIN}" --dns-cloudflare --dns-cloudflare-credentials "${CLOUDFLARE_CREDENTIALS}" --dns-cloudflare-propagation-seconds "${DNS_PROPAGATION_SECONDS:-60}" -d "${PRIMARY_DOMAIN}" -d "*.${PRIMARY_DOMAIN}")
+  local IFS=','
+  read -r -a regions <<< "${REGION_WILDCARDS_CSV:-}"
+  for region in "${regions[@]}"; do
+    region="$(echo "$region" | xargs)"
+    [[ -z "$region" ]] && continue
+    cmd+=(-d "*.${region}.${PRIMARY_DOMAIN}")
+  done
+  "${cmd[@]}"
+}

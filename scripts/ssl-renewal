@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source /opt/ssl-renewal/lib.sh
+load_config
+banner
+
+usage() {
+cat <<'EOF'
+Использование:
+  ssl-renewal help
+  ssl-renewal doctor
+  ssl-renewal status
+  ssl-renewal start
+  ssl-renewal stop
+  ssl-renewal restart
+  ssl-renewal reload
+  ssl-renewal enable
+  ssl-renewal disable
+  ssl-renewal issue
+  ssl-renewal dry-run
+  ssl-renewal deploy
+  ssl-renewal notify-test
+  ssl-renewal edit-config
+  ssl-renewal paths
+  ssl-renewal patch-nginx [--apply]
+  ssl-renewal disable-node-renew
+  ssl-renewal cloudflare-help
+
+Команды:
+  help               Показать справку
+  doctor             Проверка зависимостей, путей, certbot, nginx, таймеров
+  status             Показать состояние сертификата, таймеров, nginx, конфиг
+  start              Запустить certbot timer на main
+  stop               Остановить certbot timer на main
+  restart            Перезапустить certbot service/timer на main
+  reload             Reload nginx на текущем хосте
+  enable             Включить certbot timer на main
+  disable            Отключить certbot timer на main, на node показать предупреждение
+  issue              Получить/обновить сертификат на main
+  dry-run            certbot renew --dry-run на main
+  deploy             Доставить сертификаты на nodes с main
+  notify-test        Отправить тест в Telegram
+  edit-config        Открыть конфиг в \$EDITOR или nano
+  paths              Показать рабочие пути
+  patch-nginx        Показать или применить патч путей ssl_certificate в nginx
+  disable-node-renew Отключить локальные renewal timers/hooks на node
+  cloudflare-help    Как получить и куда сохранить Cloudflare API Token
+EOF
+}
+
+require_role_main() { [[ "${ROLE}" == "main" ]] || { echo "Эта команда доступна только на main." >&2; exit 1; }; }
+require_role_node() { [[ "${ROLE}" == "node" ]] || { echo "Эта команда доступна только на node." >&2; exit 1; }; }
+
+do_status() {
+  echo
+  echo "ROLE: ${ROLE}"
+  show_paths
+  echo
+  if [[ -f "${CERT_DIR}/fullchain.pem" ]]; then
+    echo "--- Сертификат ---"
+    openssl x509 -in "${CERT_DIR}/fullchain.pem" -noout -subject -issuer -dates || true
+  else
+    echo "Сертификат пока не найден: ${CERT_DIR}/fullchain.pem"
+  fi
+  echo
+  echo "--- Nginx ---"
+  systemctl is-active nginx 2>/dev/null || true
+  nginx -t 2>/dev/null || true
+  echo
+  echo "--- Certbot timers ---"
+  systemctl list-timers | grep certbot || true
+}
+
+do_start() {
+  require_role_main
+  local timer
+  timer="$(detect_certbot_timer_unit)"
+  [[ -n "$timer" ]] || { echo "Timer certbot не найден." >&2; exit 1; }
+  systemctl start "$timer"
+  systemctl status "$timer" --no-pager || true
+}
+
+do_stop() {
+  require_role_main
+  local timer
+  timer="$(detect_certbot_timer_unit)"
+  [[ -n "$timer" ]] || { echo "Timer certbot не найден." >&2; exit 1; }
+  systemctl stop "$timer"
+}
+
+do_enable() {
+  require_role_main
+  local timer
+  timer="$(detect_certbot_timer_unit)"
+  [[ -n "$timer" ]] || { echo "Timer certbot не найден." >&2; exit 1; }
+  systemctl enable "$timer"
+}
+
+do_disable() {
+  if [[ "${ROLE}" == "main" ]]; then
+    local timer
+    timer="$(detect_certbot_timer_unit)"
+    [[ -n "$timer" ]] || { echo "Timer certbot не найден." >&2; exit 1; }
+    systemctl disable --now "$timer"
+  else
+    /opt/ssl-renewal/node-prep.sh --disable-renew-only
+  fi
+}
+
+do_restart() {
+  require_role_main
+  local service timer
+  service="$(detect_certbot_service_unit)"
+  timer="$(detect_certbot_timer_unit)"
+  [[ -n "$service" ]] && systemctl restart "$service" || true
+  [[ -n "$timer" ]] && systemctl restart "$timer" || true
+}
+
+do_reload() {
+  systemctl reload nginx
+  echo "nginx reloaded"
+}
+
+do_issue() {
+  require_role_main
+  run_issue
+}
+
+do_dry_run() {
+  require_role_main
+  certbot renew --dry-run
+}
+
+do_deploy() {
+  require_role_main
+  /opt/ssl-renewal/deploy-certs.sh
+}
+
+do_notify_test() {
+  notify_tg "✅ <b>SSL Renewal</b>%0AHost: <code>$(hostname -f 2>/dev/null || hostname)</code>%0AMessage: test notification"
+  echo "Notification requested"
+}
+
+do_doctor() {
+  if [[ "${ROLE}" == "main" ]]; then
+    doctor_main && echo "doctor: OK" || { echo "doctor: FAIL"; exit 1; }
+  else
+    doctor_node && echo "doctor: OK" || { echo "doctor: FAIL"; exit 1; }
+  fi
+}
+
+do_edit_config() {
+  "${EDITOR:-nano}" /etc/ssl-renewal/config.env
+}
+
+do_patch_nginx() {
+  /opt/ssl-renewal/node-nginx-patch.sh "$@"
+}
+
+do_disable_node_renew() {
+  /opt/ssl-renewal/node-prep.sh --disable-renew-only
+}
+
+
+do_cloudflare_help() {
+cat <<EOF
+Как получить Cloudflare API Token:
+  1. Cloudflare Dashboard
+  2. My Profile -> API Tokens -> Create Token
+  3. Права:
+       Zone -> DNS -> Edit
+       Zone -> Zone -> Read
+  4. Ограничь токен нужной зоной, например ${PRIMARY_DOMAIN}
+  5. Сохрани токен в файл:
+       ${CLOUDFLARE_CREDENTIALS:-/root/.secrets/certbot/cloudflare.ini}
+     в виде строки:
+       dns_cloudflare_api_token = YOUR_TOKEN
+
+После этого проверь:
+  ssl-renewal doctor
+  ssl-renewal issue
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  help|-h|--help) usage ;;
+  doctor) do_doctor ;;
+  status) do_status ;;
+  start) do_start ;;
+  stop) do_stop ;;
+  restart) do_restart ;;
+  reload) do_reload ;;
+  enable) do_enable ;;
+  disable) do_disable ;;
+  issue) do_issue ;;
+  dry-run) do_dry_run ;;
+  deploy) do_deploy ;;
+  notify-test) do_notify_test ;;
+  edit-config) do_edit_config ;;
+  paths) show_paths ;;
+  patch-nginx) do_patch_nginx "$@" ;;
+  disable-node-renew) do_disable_node_renew ;;
+  *) echo "Неизвестная команда: $cmd" >&2; usage; exit 1 ;;
+esac
