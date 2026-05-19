@@ -12,7 +12,7 @@ REPO_SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
 mkdir -p "${APP_DIR}" "${ETC_DIR}" "${APP_DIR}/logs"
 
 banner() {
-cat <<'EOF'
+cat <<'BANNER'
    _____ _____ _        ____                              _
   / ____/ ____| |      |  _ \                            | |
  | (___| (___ | |      | |_) |___ _ __   _____      ____| |
@@ -20,12 +20,9 @@ cat <<'EOF'
   ____) |___) | |____  | |_) |  __/ | | |  __/\ V  V / (_| |
  |_____/_____/|______| |____/ \___|_| |_|\___| \_/\_/ \__,_|
 
- SSL Renewal
- Centralized wildcard certificate issuance, sync, and Telegram alerts
-
- Developer: Indie_Master
- GitHub: https://github.com/indie-master
-EOF
+ SSL Renewal Toolkit
+ Centralized certificate issuance, sync, and optional Telegram alerts
+BANNER
 }
 
 say() { printf "\n[%s] %s\n" "$(date '+%F %T')" "$*"; }
@@ -33,14 +30,21 @@ warn() { printf "\n[WARN] %s\n" "$*" >&2; }
 die() { printf "\n[ERROR] %s\n" "$*" >&2; exit 1; }
 
 require_root() {
-  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "Запусти install.sh от root."
+  [[ ${EUID:-$(id -u)} -eq 0 ]] || die "Run install.sh as root."
+}
+
+ensure_scripts_present() {
+  local required=(ssl-renewal lib.sh deploy-certs.sh telegram-notify.sh node-prep.sh node-nginx-patch.sh disable-renew-on-nodes.sh)
+  for f in "${required[@]}"; do
+    [[ -f "${REPO_SCRIPTS_DIR}/${f}" ]] || die "Missing required file: ${REPO_SCRIPTS_DIR}/${f}"
+  done
 }
 
 detect_pkg_manager() {
   if command -v apt-get >/dev/null 2>&1; then
     echo "apt"
   else
-    die "Поддерживается только apt-based система. Нужен Ubuntu/Debian."
+    die "Only apt-based systems are supported (Ubuntu/Debian)."
   fi
 }
 
@@ -54,7 +58,7 @@ ensure_base_packages() {
 }
 
 ensure_certbot_main() {
-  say "Проверяю certbot и Cloudflare DNS plugin..."
+  say "Checking certbot and Cloudflare DNS plugin..."
   systemctl enable --now snapd.socket >/dev/null 2>&1 || true
   snap install core >/dev/null 2>&1 || true
   snap refresh core >/dev/null 2>&1 || true
@@ -62,7 +66,7 @@ ensure_certbot_main() {
   snap set certbot trust-plugin-with-root=ok >/dev/null 2>&1 || true
   snap install certbot-dns-cloudflare >/dev/null 2>&1 || true
   ln -sf /snap/bin/certbot /usr/bin/certbot
-  certbot plugins | grep -q 'dns-cloudflare' || die "Плагин dns-cloudflare не найден после установки."
+  certbot plugins | grep -q 'dns-cloudflare' || die "dns-cloudflare plugin not found after installation."
 }
 
 prompt_default() {
@@ -76,9 +80,15 @@ prompt_default() {
   fi
 }
 
+prompt_secret() {
+  local prompt="$1" value
+  read -r -s -p "$prompt: " value || true
+  echo
+  printf '%s' "$value"
+}
+
 prompt_yes_no() {
-  local prompt="$1" default="${2:-N}" value
-  local suffix="[y/N]"
+  local prompt="$1" default="${2:-N}" value suffix="[y/N]"
   [[ "$default" =~ ^[Yy]$ ]] && suffix="[Y/n]"
   read -r -p "$prompt $suffix: " value || true
   value="${value:-$default}"
@@ -88,76 +98,97 @@ prompt_yes_no() {
 collect_nodes() {
   local nodes=()
   echo
-  echo "Введи список нод в формате user@host. Пустая строка завершит ввод."
+  echo "Enter node list as user@host (blank line to finish)."
   while true; do
     local line
     read -r -p "node> " line || true
     [[ -z "$line" ]] && break
     nodes+=("$line")
   done
-  printf '%s\n' "${nodes[@]}"
+  printf '%s\n' "${nodes[@]}" | awk '!x[$0]++'
 }
 
 deploy_ssh_keys_interactive() {
   local nodes_file="$1"
-  [[ -s "$nodes_file" ]] || { warn "nodes.txt пустой, пропускаю деплой ключей."; return 0; }
+  [[ -s "$nodes_file" ]] || { warn "nodes.txt is empty, skipping SSH key deployment."; return 0; }
 
   mkdir -p /root/.ssh
   chmod 700 /root/.ssh
   if [[ ! -f /root/.ssh/id_ed25519 ]]; then
-    say "Генерирую SSH-ключ для main..."
+    say "Generating SSH keypair on main..."
     ssh-keygen -t ed25519 -C "ssl-renewal@$(hostname -f 2>/dev/null || hostname)" -f /root/.ssh/id_ed25519 -N ""
   fi
 
-  if ! prompt_yes_no "Попробовать раскидать публичный SSH ключ на ноды сейчас?" "Y"; then
-    cat <<EOF
+  if ! prompt_yes_no "Attempt automatic ssh-copy-id to nodes now?" "Y"; then
+    cat <<'EOF2'
 
-Ручной вариант:
-1. Возьми публичный ключ:
+Manual onboarding:
+1. Show the public key on main:
    cat /root/.ssh/id_ed25519.pub
-2. Добавь его на каждую ноду в ~/.ssh/authorized_keys
-3. Затем продолжи установку и проверь доступ:
-   ssh root@NODE "hostname"
+2. Add it to each node's ~/.ssh/authorized_keys (root or your deploy user).
+3. Verify from main:
+   ssh user@node1.example.com "hostname"
 
-EOF
+EOF2
     return 0
   fi
 
-  if ! command -v ssh-copy-id >/dev/null 2>&1; then
-    apt-get install -y openssh-client >/dev/null 2>&1 || true
-  fi
+  command -v ssh-copy-id >/dev/null 2>&1 || apt-get install -y openssh-client >/dev/null 2>&1 || true
 
   while IFS= read -r node || [[ -n "$node" ]]; do
     [[ -z "$node" ]] && continue
-    say "Пробую настроить SSH доступ для $node"
+    say "Bootstrapping SSH trust for $node"
     if ssh -o BatchMode=yes -o ConnectTimeout=8 "$node" "echo ok" </dev/null >/dev/null 2>&1; then
-      say "Ключ уже работает для $node"
+      say "SSH key auth already works for $node"
       continue
     fi
 
-    echo
-    echo "Если у ноды открыт вход по паролю, сейчас ssh-copy-id попросит пароль."
-    echo "Если вход только по ключу и текущий ключ не подходит, просто прерви и добавь ключ вручную."
+    echo "If password auth is enabled, ssh-copy-id will prompt for a password."
+    echo "If password auth is disabled, this may fail; manual steps will be shown."
     if ssh-copy-id -i /root/.ssh/id_ed25519.pub "$node"; then
-      say "SSH ключ добавлен на $node"
+      say "SSH key installed on $node"
     else
-      warn "Не удалось автоматически добавить ключ на $node."
-      cat <<EOF
-Альтернатива для ручной установки:
-  cat /root/.ssh/id_ed25519.pub
-  # вставь ключ на ноде в ~/.ssh/authorized_keys
-После этого проверь:
-  ssh $node "hostname"
+      warn "Automatic key install failed for $node."
+      cat <<EOF2
+Public key (copy this to ${node} -> ~/.ssh/authorized_keys):
+$(cat /root/.ssh/id_ed25519.pub)
 
-EOF
+Manual steps:
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  echo '<PASTE_PUBLIC_KEY_HERE>' >> ~/.ssh/authorized_keys
+  chmod 600 ~/.ssh/authorized_keys
+
+Then verify from main:
+  ssh $node "hostname"
+EOF2
     fi
   done < "$nodes_file"
+}
+
+cloudflare_token_instructions() {
+cat <<'EOF2'
+How to create a Cloudflare API Token:
+  1. Open Cloudflare Dashboard.
+  2. Go to My Profile -> API Tokens -> Create Token.
+  3. Use "Edit zone DNS" template or create a custom token.
+  4. Minimum permissions:
+       - Zone -> DNS -> Edit
+       - Zone -> Zone -> Read
+  5. Zone Resources: include your specific zone (for example: example.com).
+  6. Create token and copy it.
+
+Token file location on this server:
+  /root/.secrets/certbot/cloudflare.ini
+
+Required permissions:
+  chmod 600 /root/.secrets/certbot/cloudflare.ini
+EOF2
 }
 
 write_main_config() {
   local domain="$1" propagation="$2" target_dir="$3" cf_ini="$4" telegram_enabled="$5" bot_token="$6" chat_id="$7" region_csv="$8"
   mkdir -p "${ETC_DIR}" "${APP_DIR}" "${APP_DIR}/logs"
-  cat > "${ETC_DIR}/config.env" <<EOF
+  cat > "${ETC_DIR}/config.env" <<EOF2
 ROLE="main"
 APP_DIR="${APP_DIR}"
 ETC_DIR="${ETC_DIR}"
@@ -172,16 +203,14 @@ LOG_DIR="${APP_DIR}/logs"
 TELEGRAM_ENABLED="${telegram_enabled}"
 TELEGRAM_BOT_TOKEN="${bot_token}"
 TELEGRAM_CHAT_ID="${chat_id}"
-DEVELOPER_NAME="Indie_Master"
-DEVELOPER_GITHUB="https://github.com/indie-master"
-EOF
+EOF2
   chmod 600 "${ETC_DIR}/config.env"
 }
 
 write_node_config() {
   local domain="$1" target_dir="$2"
   mkdir -p "${ETC_DIR}" "${APP_DIR}" "${APP_DIR}/logs"
-  cat > "${ETC_DIR}/config.env" <<EOF
+  cat > "${ETC_DIR}/config.env" <<EOF2
 ROLE="node"
 APP_DIR="${APP_DIR}"
 ETC_DIR="${ETC_DIR}"
@@ -190,9 +219,7 @@ TARGET_DIR="${target_dir}"
 CERT_DIR="${target_dir}"
 LOG_DIR="${APP_DIR}/logs"
 TELEGRAM_ENABLED="0"
-DEVELOPER_NAME="Indie_Master"
-DEVELOPER_GITHUB="https://github.com/indie-master"
-EOF
+EOF2
   chmod 600 "${ETC_DIR}/config.env"
 }
 
@@ -209,223 +236,184 @@ install_runtime_files() {
 
 write_certbot_hook() {
   mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-  cat > /etc/letsencrypt/renewal-hooks/deploy/ssl-renewal-deploy.sh <<'EOF'
+  cat > /etc/letsencrypt/renewal-hooks/deploy/ssl-renewal-deploy.sh <<'EOF2'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ -x /opt/ssl-renewal/deploy-certs.sh ]]; then
   /opt/ssl-renewal/deploy-certs.sh
 fi
-EOF
+EOF2
   chmod +x /etc/letsencrypt/renewal-hooks/deploy/ssl-renewal-deploy.sh
 }
 
 issue_main_certificate() {
   local domain="$1" propagation="$2" cf_ini="$3" region_csv="$4"
   local -a cmd
-  cmd=(certbot certonly --cert-name "$domain" --dns-cloudflare --dns-cloudflare-credentials "$cf_ini" --dns-cloudflare-propagation-seconds "$propagation" -d "$domain" -d "*.${domain}")
+  cmd=(certbot certonly --cert-name "$domain" --dns-cloudflare --dns-cloudflare-credentials "$cf_ini" --dns-cloudflare-propagation-seconds "$propagation" -d "$domain" -d "*.$domain")
   IFS=',' read -r -a regions <<< "$region_csv"
   for region in "${regions[@]}"; do
     region="$(echo "$region" | xargs)"
     [[ -z "$region" ]] && continue
     cmd+=(-d "*.${region}.${domain}")
   done
-  printf '\nКоманда выпуска сертификата:\n%s\n\n' "${cmd[*]}"
-  if prompt_yes_no "Получить/обновить сертификат сейчас?" "Y"; then
+  printf '\nCertificate issue command:\n%s\n\n' "${cmd[*]}"
+  if prompt_yes_no "Issue/renew certificate now?" "Y"; then
     "${cmd[@]}"
   else
-    warn "Пропускаю выпуск сертификата. Позже можно запустить: ssl-renewal issue"
+    warn "Skipping certificate issue. You can run: ssl-renewal issue"
   fi
-}
-
-write_nodes_file() {
-  local nodes_file="${ETC_DIR}/nodes.txt"
-  cat > "$nodes_file"
-  chmod 600 "$nodes_file"
 }
 
 configure_node_host() {
-  local domain="$1" target_dir="$2"
-  say "Подготавливаю node..."
+  local target_dir="$1"
+  say "Preparing node settings..."
   "${APP_DIR}/node-prep.sh"
-  if prompt_yes_no "Попробовать автоматически переписать ssl_certificate пути в nginx на ${target_dir}?" "N"; then
+  if prompt_yes_no "Patch nginx ssl_certificate paths to ${target_dir} automatically?" "N"; then
     "${APP_DIR}/node-nginx-patch.sh" --apply
   else
-    cat <<EOF
+    cat <<EOF2
 
-Ручной шаблон для nginx:
+Nginx manual template:
   ssl_certificate     ${target_dir}/fullchain.pem;
   ssl_certificate_key ${target_dir}/privkey.pem;
 
-Потом:
+Then run:
   nginx -t && systemctl reload nginx
-
-EOF
+EOF2
   fi
-}
-
-
-cloudflare_token_instructions() {
-cat <<'EOF'
-Как получить Cloudflare API Token:
-  1. Открой Cloudflare Dashboard.
-  2. Перейди: My Profile -> API Tokens -> Create Token.
-  3. Выбери шаблон "Edit zone DNS" или создай custom token.
-  4. Выдай права:
-       - Zone -> DNS -> Edit
-       - Zone -> Zone -> Read
-  5. Zone Resources: Include -> Specific zone -> нужная зона (например swiftlessvpn.ru)
-  6. Create Token и сохрани его.
-
-Токен будет сохранён в:
-  /root/.secrets/certbot/cloudflare.ini
-
-Позже токен можно изменить через:
-  ssl-renewal edit-config
-и вручную поправить файл credentials.
-EOF
 }
 
 main_install_flow() {
   ensure_certbot_main
 
   local domain propagation target_dir region_csv cf_token cf_ini telegram_enabled="0" bot_token="" chat_id=""
-  domain="$(prompt_default 'Основной домен' 'swiftlessvpn.ru')"
-  propagation="$(prompt_default 'DNS propagation seconds для Cloudflare' '60')"
-  target_dir="/etc/letsencrypt/live/${domain}"
-  target_dir="$(prompt_default 'Путь, куда nodes будут складывать сертификаты' "$target_dir")"
-  region_csv="$(prompt_default 'Список региональных wildcard зон через запятую (пример: de,msk,sk,us)' 'de,msk,sk,us')"
+  domain="$(prompt_default 'Primary domain' 'example.com')"
+  propagation="$(prompt_default 'DNS propagation seconds for Cloudflare' '60')"
+  target_dir="$(prompt_default 'Certificate path used on nodes' "/etc/letsencrypt/live/${domain}")"
+  region_csv="$(prompt_default 'Regional wildcard prefixes (comma-separated, e.g. region1,region2)' 'region1,region2')"
 
   echo
-  echo "Для main нужен Cloudflare API Token с правами Zone:DNS Edit и Zone:Read."
-  if prompt_yes_no "Показать краткую инструкцию по получению Cloudflare API Token?" "Y"; then
+  echo "Main server requires a Cloudflare API Token with Zone DNS Edit + Zone Read."
+  if prompt_yes_no "Show Cloudflare token creation instructions?" "Y"; then
     cloudflare_token_instructions
   fi
 
   mkdir -p /root/.secrets/certbot
   cf_ini="/root/.secrets/certbot/cloudflare.ini"
 
-  if prompt_yes_no "Внести Cloudflare API Token сейчас?" "Y"; then
-    cf_token="$(prompt_default 'Cloudflare API Token' '')"
-    [[ -n "$cf_token" ]] || die "Cloudflare API Token обязателен, если ты выбрал ввод сейчас."
-    cat > "$cf_ini" <<EOF
-dns_cloudflare_api_token = ${cf_token}
-EOF
+  if prompt_yes_no "Add Cloudflare API Token now?" "Y"; then
+    cf_token="$(prompt_secret 'Cloudflare API Token')"
+    [[ -n "$cf_token" ]] || die "Cloudflare API Token is required when immediate setup is selected."
+    printf 'dns_cloudflare_api_token = %s\n' "$cf_token" > "$cf_ini"
     chmod 600 "$cf_ini"
   else
-    warn "Токен сейчас не внесён. Выпуск сертификата будет пропущен до тех пор, пока ты не заполнишь ${cf_ini}."
-    cat > "$cf_ini" <<'EOF'
+    warn "Token skipped for now. Certificate issuance will be skipped until token is set."
+    cat > "$cf_ini" <<'EOF2'
 dns_cloudflare_api_token = PUT_YOUR_TOKEN_HERE
-EOF
+EOF2
     chmod 600 "$cf_ini"
   fi
 
-  if prompt_yes_no "Включить уведомления в Telegram?" "Y"; then
+  if prompt_yes_no "Enable Telegram notifications?" "N"; then
     telegram_enabled="1"
-    bot_token="$(prompt_default 'Telegram BOT token' '')"
-    chat_id="$(prompt_default 'Telegram chat_id' '')"
+    bot_token="$(prompt_default 'Telegram bot token' '')"
+    chat_id="$(prompt_default 'Telegram chat ID' '')"
   fi
 
   write_main_config "$domain" "$propagation" "$target_dir" "$cf_ini" "$telegram_enabled" "$bot_token" "$chat_id" "$region_csv"
   install_runtime_files
 
-  local tmp_nodes
-  tmp_nodes="$(mktemp)"
-  collect_nodes > "$tmp_nodes"
-  cat "$tmp_nodes" > "${ETC_DIR}/nodes.txt"
+  collect_nodes > "${ETC_DIR}/nodes.txt"
   chmod 600 "${ETC_DIR}/nodes.txt"
   deploy_ssh_keys_interactive "${ETC_DIR}/nodes.txt"
   write_certbot_hook
 
-  if [[ -s "${ETC_DIR}/nodes.txt" ]] && prompt_yes_no "Отключить renewal hooks/timers на нодах после первого деплоя?" "Y"; then
+  if [[ -s "${ETC_DIR}/nodes.txt" ]] && prompt_yes_no "Disable renewal timers/hooks on nodes after first deploy?" "Y"; then
     touch "${APP_DIR}/.disable_nodes_after_first_deploy"
   else
     rm -f "${APP_DIR}/.disable_nodes_after_first_deploy"
   fi
 
   if grep -q 'PUT_YOUR_TOKEN_HERE' "$cf_ini"; then
-    warn "Cloudflare token ещё не задан. Пропускаю выпуск сертификата."
-    cat <<EOF
+    warn "Cloudflare token is not configured yet; skipping certificate issuance."
+    cat <<EOF2
 
-Чтобы продолжить позже:
-  1. Открой ${cf_ini}
-  2. Вставь реальный Cloudflare API Token
-  3. Запусти:
+Next steps:
+  1. Edit ${cf_ini}
+  2. Set: dns_cloudflare_api_token = <REAL_TOKEN>
+  3. Run:
+     ssl-renewal cloudflare-help
+     ssl-renewal doctor
      ssl-renewal issue
      ssl-renewal deploy
-
-EOF
+EOF2
   else
     issue_main_certificate "$domain" "$propagation" "$cf_ini" "$region_csv"
   fi
 
-  if [[ -s "${ETC_DIR}/nodes.txt" ]] && prompt_yes_no "Сразу доставить сертификаты на ноды?" "Y"; then
+  if [[ -s "${ETC_DIR}/nodes.txt" ]] && prompt_yes_no "Deploy certificates to nodes now?" "Y"; then
     "${APP_DIR}/deploy-certs.sh" || true
     if [[ -f "${APP_DIR}/.disable_nodes_after_first_deploy" ]]; then
       "${APP_DIR}/disable-renew-on-nodes.sh" || true
     fi
   fi
 
-  cat <<EOF
+  cat <<'EOF2'
 
-Установка main завершена.
-Дальше команды:
+Main installation completed.
+Recommended next commands:
   ssl-renewal doctor
   ssl-renewal status
   ssl-renewal dry-run
-  ssl-renewal issue
-  ssl-renewal deploy
-  ssl-renewal edit-config
-
-EOF
+EOF2
 }
 
 node_install_flow() {
   local domain target_dir
-  domain="$(prompt_default 'Основной домен сертификата, который приходит с main' 'swiftlessvpn.ru')"
-  target_dir="/etc/letsencrypt/live/${domain}"
-  target_dir="$(prompt_default 'Единый путь к сертификату на node' "$target_dir")"
+  domain="$(prompt_default 'Primary domain handled by main' 'example.com')"
+  target_dir="$(prompt_default 'Certificate path on this node' "/etc/letsencrypt/live/${domain}")"
 
   write_node_config "$domain" "$target_dir"
   install_runtime_files
-  configure_node_host "$domain" "$target_dir"
+  configure_node_host "$target_dir"
 
-  cat <<EOF
+  cat <<'EOF2'
 
-Установка node завершена.
-Полезные команды:
+Node installation completed.
+Useful commands:
   ssl-renewal doctor
   ssl-renewal status
   ssl-renewal patch-nginx
   ssl-renewal reload
-
-EOF
+EOF2
 }
 
 main() {
   require_root
+  ensure_scripts_present
   banner
-  local pm
+  local pm role
   pm="$(detect_pkg_manager)"
   ensure_base_packages "$pm"
 
-  local role="${1:-}"
+  role="${1:-}"
   if [[ -z "$role" ]]; then
     echo
-    echo "Выбери роль:"
+    echo "Select role:"
     echo "  1) main"
     echo "  2) node"
-    read -r -p "Роль [1/2]: " ans || true
+    read -r -p "Role [1/2]: " ans || true
     case "${ans:-1}" in
       1) role="main" ;;
       2) role="node" ;;
-      *) die "Неизвестный выбор роли." ;;
+      *) die "Invalid role selection." ;;
     esac
   fi
 
   case "$role" in
     main|--role=main) main_install_flow ;;
     node|--role=node) node_install_flow ;;
-    *) die "Использование: ./install.sh [main|node|--role=main|--role=node]" ;;
+    *) die "Usage: ./install.sh [main|node|--role=main|--role=node]" ;;
   esac
 }
 
