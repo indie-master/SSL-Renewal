@@ -194,7 +194,7 @@ Installer flow:
 
 ---
 
-## Cloudflare API Token
+Required permissions:
 
 Required minimum permissions:
 
