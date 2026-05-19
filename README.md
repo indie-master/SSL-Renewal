@@ -10,6 +10,68 @@ This repository keeps the existing Bash workflow and improves safety, docs, and 
 
 ---
 
+## Quick Install
+
+Repository:
+
+- `https://github.com/indie-master/SSL-Renewal`
+
+### Main server
+
+**curl method**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | bash -s -- https://github.com/indie-master/SSL-Renewal.git main
+```
+
+**wget method**
+
+```bash
+wget -qO- https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | bash -s -- https://github.com/indie-master/SSL-Renewal.git main
+```
+
+**Manual method**
+
+```bash
+git clone https://github.com/indie-master/SSL-Renewal.git
+cd SSL-Renewal
+chmod +x install.sh
+sudo ./install.sh main
+```
+
+### Node server
+
+**curl method**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | bash -s -- https://github.com/indie-master/SSL-Renewal.git node
+```
+
+**Manual method**
+
+```bash
+git clone https://github.com/indie-master/SSL-Renewal.git
+cd SSL-Renewal
+chmod +x install.sh
+sudo ./install.sh node
+```
+
+### After install
+
+```bash
+ssl-renewal help
+ssl-renewal doctor
+ssl-renewal cloudflare-help
+ssl-renewal issue
+ssl-renewal deploy
+ssl-renewal dry-run
+```
+
+> Warning: Always review `bootstrap.sh` before running remote shell commands:
+> `https://github.com/indie-master/SSL-Renewal/blob/main/bootstrap.sh`
+
+---
+
 ## Architecture
 
 ```text
@@ -132,7 +194,7 @@ Installer flow:
 
 ---
 
-## Cloudflare API Token
+Required permissions:
 
 Required minimum permissions:
 
