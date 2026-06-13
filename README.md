@@ -10,6 +10,38 @@ This repository keeps the existing Bash workflow and improves safety, docs, and 
 
 ---
 
+## One-line install
+
+> Security note: Review `bootstrap.sh` before running remote shell commands: [https://github.com/indie-master/SSL-Renewal/blob/main/bootstrap.sh](https://github.com/indie-master/SSL-Renewal/blob/main/bootstrap.sh)
+
+### Main server
+
+Using `curl`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | sudo bash -s -- https://github.com/indie-master/SSL-Renewal.git main
+```
+
+Using `wget`:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | sudo bash -s -- https://github.com/indie-master/SSL-Renewal.git main
+```
+
+### Node server
+
+Using `curl`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | sudo bash -s -- https://github.com/indie-master/SSL-Renewal.git node
+```
+
+Using `wget`:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | sudo bash -s -- https://github.com/indie-master/SSL-Renewal.git node
+```
+
 ## Architecture
 
 ```text
@@ -69,7 +101,7 @@ Installed automatically by `install.sh`:
 ### Option A: clone + install (recommended)
 
 ```bash
-git clone <YOUR_REPO_URL> ssl-renewal
+git clone https://github.com/indie-master/SSL-Renewal.git ssl-renewal
 cd ssl-renewal
 chmod +x install.sh
 sudo ./install.sh main
@@ -78,7 +110,7 @@ sudo ./install.sh main
 ### Option B: short bootstrap (review before running)
 
 ```bash
-bash -c 'set -euo pipefail; tmp=$(mktemp -d); cd "$tmp"; git clone <YOUR_REPO_URL> repo; cd repo; chmod +x install.sh; sudo ./install.sh main'
+# Prefer the one-line install commands above for remote bootstrap installs.
 ```
 
 > Security note: Always review scripts before executing bootstrap one-liners.
@@ -88,7 +120,7 @@ bash -c 'set -euo pipefail; tmp=$(mktemp -d); cd "$tmp"; git clone <YOUR_REPO_UR
 
 ```bash
 chmod +x bootstrap.sh
-./bootstrap.sh <YOUR_REPO_URL> main
+./bootstrap.sh https://github.com/indie-master/SSL-Renewal.git main
 ```
 
 ---
