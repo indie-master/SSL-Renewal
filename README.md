@@ -10,6 +10,38 @@ This repository keeps the existing Bash workflow and improves safety, docs, and 
 
 ---
 
+## One-line install
+
+> Security note: Review `bootstrap.sh` before running remote shell commands: [https://github.com/indie-master/SSL-Renewal/blob/main/bootstrap.sh](https://github.com/indie-master/SSL-Renewal/blob/main/bootstrap.sh)
+
+### Main server
+
+Using `curl`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | sudo bash -s -- https://github.com/indie-master/SSL-Renewal.git main
+```
+
+Using `wget`:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | sudo bash -s -- https://github.com/indie-master/SSL-Renewal.git main
+```
+
+### Node server
+
+Using `curl`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | sudo bash -s -- https://github.com/indie-master/SSL-Renewal.git node
+```
+
+Using `wget`:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | sudo bash -s -- https://github.com/indie-master/SSL-Renewal.git node
+```
+
 ## Architecture
 
 ```text
@@ -54,7 +86,7 @@ This repository keeps the existing Bash workflow and improves safety, docs, and 
 - Root access
 - Nginx on nodes
 - SSH connectivity from main to nodes
-- Cloudflare-managed DNS for your zone
+- Cloudflare-managed DNS for every zone included in the certificate
 
 Installed automatically by `install.sh`:
 
@@ -69,7 +101,7 @@ Installed automatically by `install.sh`:
 ### Option A: clone + install (recommended)
 
 ```bash
-git clone <YOUR_REPO_URL> ssl-renewal
+git clone https://github.com/indie-master/SSL-Renewal.git ssl-renewal
 cd ssl-renewal
 chmod +x install.sh
 sudo ./install.sh main
@@ -78,7 +110,7 @@ sudo ./install.sh main
 ### Option B: short bootstrap (review before running)
 
 ```bash
-bash -c 'set -euo pipefail; tmp=$(mktemp -d); cd "$tmp"; git clone <YOUR_REPO_URL> repo; cd repo; chmod +x install.sh; sudo ./install.sh main'
+# Prefer the one-line install commands above for remote bootstrap installs.
 ```
 
 > Security note: Always review scripts before executing bootstrap one-liners.
@@ -88,7 +120,7 @@ bash -c 'set -euo pipefail; tmp=$(mktemp -d); cd "$tmp"; git clone <YOUR_REPO_UR
 
 ```bash
 chmod +x bootstrap.sh
-./bootstrap.sh <YOUR_REPO_URL> main
+./bootstrap.sh https://github.com/indie-master/SSL-Renewal.git main
 ```
 
 ---
@@ -107,6 +139,7 @@ Installer flow:
 2. Installs Certbot + Cloudflare plugin
 3. Collects:
    - primary domain (example: `example.com`)
+   - optional extra primary domains (example: `example.net,example.org`)
    - DNS propagation wait seconds
    - target cert path for nodes
    - optional regional wildcard prefixes (example: `region1,region2`)
@@ -134,10 +167,12 @@ Installer flow:
 
 ## Cloudflare API Token
 
-Required minimum permissions:
+Required minimum permissions for every zone used by `PRIMARY_DOMAIN` and `EXTRA_DOMAINS_CSV`:
 
 - `Zone -> DNS -> Edit`
 - `Zone -> Zone -> Read`
+
+All domains in the certificate must be hosted in Cloudflare or otherwise accessible through the same Cloudflare API token. For example, a certificate covering `example.com`, `example.net`, and `example.org` requires token access to all three zones.
 
 Token file location on main:
 
@@ -169,6 +204,28 @@ ssl-renewal cloudflare-help
 ssl-renewal doctor
 ssl-renewal issue
 ```
+
+---
+
+## Multi-domain wildcard certificates
+
+SSL Renewal keeps `PRIMARY_DOMAIN` as the certificate name and default domain for backward compatibility. You can add more primary domains with `EXTRA_DOMAINS_CSV`.
+
+For every domain in `PRIMARY_DOMAIN` plus `EXTRA_DOMAINS_CSV`, `ssl-renewal issue` requests:
+
+- the base domain, such as `example.com`
+- the direct wildcard, such as `*.example.com`
+- every regional wildcard from `REGION_WILDCARDS_CSV`, such as `*.de.example.com`
+
+Example `/etc/ssl-renewal/config.env` values:
+
+```bash
+PRIMARY_DOMAIN="example.com"
+EXTRA_DOMAINS_CSV="example.net,example.org"
+REGION_WILDCARDS_CSV="de,sk,us"
+```
+
+The certificate remains named after `PRIMARY_DOMAIN` (`--cert-name example.com`), while the SAN list also includes `example.net` and `example.org` with their wildcard and regional wildcard names. Empty `EXTRA_DOMAINS_CSV` keeps the original single-domain behavior.
 
 ---
 
