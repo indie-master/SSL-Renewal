@@ -21,6 +21,11 @@ cloudflare_output="$(bash scripts/ssl-renewal cloudflare-help)"
 [[ "$help_output" != *"lib.sh not found"* ]] || { echo "help hit lib.sh load error" >&2; exit 1; }
 [[ "$cloudflare_output" != *"lib.sh not found"* ]] || { echo "cloudflare-help hit lib.sh load error" >&2; exit 1; }
 
+
+echo "Checking multi-domain configuration support..."
+[[ "$(< install.sh)" == *"EXTRA_DOMAINS_CSV"* ]] || { echo "install.sh missing EXTRA_DOMAINS_CSV" >&2; exit 1; }
+[[ "$(< scripts/lib.sh)" == *"EXTRA_DOMAINS_CSV"* ]] || { echo "scripts/lib.sh missing EXTRA_DOMAINS_CSV" >&2; exit 1; }
+
 echo "Checking executable bits..."
 for f in install.sh smoke-test.sh scripts/*.sh scripts/ssl-renewal bootstrap.sh; do
   [[ -x "$f" ]] || echo "  WARN: not executable: $f"

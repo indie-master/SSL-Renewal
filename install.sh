@@ -174,7 +174,7 @@ How to create a Cloudflare API Token:
   4. Minimum permissions:
        - Zone -> DNS -> Edit
        - Zone -> Zone -> Read
-  5. Zone Resources: include your specific zone (for example: example.com).
+  5. Zone Resources: include every zone used by SSL Renewal (for example: example.com, example.net, and example.org).
   6. Create token and copy it.
 
 Token file location on this server:
@@ -186,13 +186,14 @@ EOF2
 }
 
 write_main_config() {
-  local domain="$1" propagation="$2" target_dir="$3" cf_ini="$4" telegram_enabled="$5" bot_token="$6" chat_id="$7" region_csv="$8"
+  local domain="$1" extra_domains_csv="$2" propagation="$3" target_dir="$4" cf_ini="$5" telegram_enabled="$6" bot_token="$7" chat_id="$8" region_csv="$9"
   mkdir -p "${ETC_DIR}" "${APP_DIR}" "${APP_DIR}/logs"
   cat > "${ETC_DIR}/config.env" <<EOF2
 ROLE="main"
 APP_DIR="${APP_DIR}"
 ETC_DIR="${ETC_DIR}"
 PRIMARY_DOMAIN="${domain}"
+EXTRA_DOMAINS_CSV="${extra_domains_csv}"
 TARGET_DIR="${target_dir}"
 CERT_DIR="/etc/letsencrypt/live/${domain}"
 CLOUDFLARE_CREDENTIALS="${cf_ini}"
@@ -215,6 +216,7 @@ ROLE="node"
 APP_DIR="${APP_DIR}"
 ETC_DIR="${ETC_DIR}"
 PRIMARY_DOMAIN="${domain}"
+EXTRA_DOMAINS_CSV=""
 TARGET_DIR="${target_dir}"
 CERT_DIR="${target_dir}"
 LOG_DIR="${APP_DIR}/logs"
@@ -246,15 +248,46 @@ EOF2
   chmod +x /etc/letsencrypt/renewal-hooks/deploy/ssl-renewal-deploy.sh
 }
 
+trim_csv_value() {
+  local value="${1:-}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
 issue_main_certificate() {
-  local domain="$1" propagation="$2" cf_ini="$3" region_csv="$4"
-  local -a cmd
-  cmd=(certbot certonly --cert-name "$domain" --dns-cloudflare --dns-cloudflare-credentials "$cf_ini" --dns-cloudflare-propagation-seconds "$propagation" -d "$domain" -d "*.$domain")
+  local domain="$1" extra_domains_csv="$2" propagation="$3" cf_ini="$4" region_csv="$5"
+  local -a cmd domains extra_domains regions
+  local -A seen_domains=() added_sans=()
+  local item region san
+  cmd=(certbot certonly --cert-name "$domain" --dns-cloudflare --dns-cloudflare-credentials "$cf_ini" --dns-cloudflare-propagation-seconds "$propagation")
+  item="$(trim_csv_value "$domain")"
+  if [[ -n "$item" ]]; then
+    domains+=("$item")
+    seen_domains["$item"]=1
+  fi
+  IFS=',' read -r -a extra_domains <<< "$extra_domains_csv"
+  for item in "${extra_domains[@]}"; do
+    item="$(trim_csv_value "$item")"
+    [[ -z "$item" || -n "${seen_domains[$item]:-}" ]] && continue
+    domains+=("$item")
+    seen_domains["$item"]=1
+  done
   IFS=',' read -r -a regions <<< "$region_csv"
-  for region in "${regions[@]}"; do
-    region="$(echo "$region" | xargs)"
-    [[ -z "$region" ]] && continue
-    cmd+=(-d "*.${region}.${domain}")
+  for item in "${domains[@]}"; do
+    for san in "$item" "*.$item"; do
+      [[ -n "${added_sans[$san]:-}" ]] && continue
+      cmd+=(-d "$san")
+      added_sans["$san"]=1
+    done
+    for region in "${regions[@]}"; do
+      region="$(trim_csv_value "$region")"
+      [[ -z "$region" ]] && continue
+      san="*.${region}.${item}"
+      [[ -n "${added_sans[$san]:-}" ]] && continue
+      cmd+=(-d "$san")
+      added_sans["$san"]=1
+    done
   done
   printf '\nCertificate issue command:\n%s\n\n' "${cmd[*]}"
   if prompt_yes_no "Issue/renew certificate now?" "Y"; then
@@ -286,8 +319,9 @@ EOF2
 main_install_flow() {
   ensure_certbot_main
 
-  local domain propagation target_dir region_csv cf_token cf_ini telegram_enabled="0" bot_token="" chat_id=""
+  local domain extra_domains_csv propagation target_dir region_csv cf_token cf_ini telegram_enabled="0" bot_token="" chat_id=""
   domain="$(prompt_default 'Primary domain' 'example.com')"
+  extra_domains_csv="$(prompt_default 'Extra primary domains, comma-separated, optional' '')"
   propagation="$(prompt_default 'DNS propagation seconds for Cloudflare' '60')"
   target_dir="$(prompt_default 'Certificate path used on nodes' "/etc/letsencrypt/live/${domain}")"
   region_csv="$(prompt_default 'Regional wildcard prefixes (comma-separated, e.g. region1,region2)' 'region1,region2')"
@@ -320,7 +354,7 @@ EOF2
     chat_id="$(prompt_default 'Telegram chat ID' '')"
   fi
 
-  write_main_config "$domain" "$propagation" "$target_dir" "$cf_ini" "$telegram_enabled" "$bot_token" "$chat_id" "$region_csv"
+  write_main_config "$domain" "$extra_domains_csv" "$propagation" "$target_dir" "$cf_ini" "$telegram_enabled" "$bot_token" "$chat_id" "$region_csv"
   install_runtime_files
 
   collect_nodes > "${ETC_DIR}/nodes.txt"
@@ -348,7 +382,7 @@ Next steps:
      ssl-renewal deploy
 EOF2
   else
-    issue_main_certificate "$domain" "$propagation" "$cf_ini" "$region_csv"
+    issue_main_certificate "$domain" "$extra_domains_csv" "$propagation" "$cf_ini" "$region_csv"
   fi
 
   if [[ -s "${ETC_DIR}/nodes.txt" ]] && prompt_yes_no "Deploy certificates to nodes now?" "Y"; then

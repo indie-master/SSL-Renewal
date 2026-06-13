@@ -109,12 +109,14 @@ do_cloudflare_help() {
   local creds_file="${CLOUDFLARE_CREDENTIALS:-/root/.secrets/certbot/cloudflare.ini}"
   cat <<EOF2
 Cloudflare API Token quick guide:
+  The same token must have DNS Edit and Zone Read access for all zones/domains in the certificate.
   1. Open Cloudflare Dashboard
   2. Go to My Profile -> API Tokens -> Create Token
   3. Minimum permissions:
        Zone -> DNS -> Edit
        Zone -> Zone -> Read
-  4. Restrict token to the required zone, for example: ${primary_domain}
+  4. Restrict token to every zone used by this install. Include ${primary_domain} and any EXTRA_DOMAINS_CSV zones.
+     Examples: example.com, example.net, example.org
   5. Save token in:
        ${creds_file}
      as:

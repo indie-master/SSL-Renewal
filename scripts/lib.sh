@@ -5,7 +5,7 @@ load_config() {
   [[ -f "$cfg" ]] || { echo "Config not found: $cfg" >&2; return 1; }
   # shellcheck disable=SC1090
   source "$cfg"
-  export ROLE APP_DIR ETC_DIR PRIMARY_DOMAIN TARGET_DIR CERT_DIR LOG_DIR TELEGRAM_ENABLED TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID NODES_FILE DNS_PROPAGATION_SECONDS CLOUDFLARE_CREDENTIALS REGION_WILDCARDS_CSV
+  export ROLE APP_DIR ETC_DIR PRIMARY_DOMAIN EXTRA_DOMAINS_CSV TARGET_DIR CERT_DIR LOG_DIR TELEGRAM_ENABLED TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID NODES_FILE DNS_PROPAGATION_SECONDS CLOUDFLARE_CREDENTIALS REGION_WILDCARDS_CSV
 }
 
 banner() {
@@ -59,6 +59,7 @@ ROLE=${ROLE:-unknown}
 APP_DIR=${APP_DIR:-}
 ETC_DIR=${ETC_DIR:-}
 PRIMARY_DOMAIN=${PRIMARY_DOMAIN:-}
+EXTRA_DOMAINS_CSV=${EXTRA_DOMAINS_CSV:-}
 TARGET_DIR=${TARGET_DIR:-}
 CERT_DIR=${CERT_DIR:-}
 NODES_FILE=${NODES_FILE:-}
@@ -92,15 +93,70 @@ doctor_node() {
   [[ "$ok" -eq 1 ]]
 }
 
-run_issue() {
-  local -a cmd
-  cmd=(certbot certonly --cert-name "${PRIMARY_DOMAIN}" --dns-cloudflare --dns-cloudflare-credentials "${CLOUDFLARE_CREDENTIALS}" --dns-cloudflare-propagation-seconds "${DNS_PROPAGATION_SECONDS:-60}" -d "${PRIMARY_DOMAIN}" -d "*.${PRIMARY_DOMAIN}")
+trim_csv_value() {
+  local value="${1:-}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+build_domain_list() {
+  local -n _out="$1"
+  local -A seen=()
+  local domain
+  _out=()
+
+  domain="$(trim_csv_value "${PRIMARY_DOMAIN:-}")"
+  if [[ -n "$domain" ]]; then
+    _out+=("$domain")
+    seen["$domain"]=1
+  fi
+
   local IFS=','
+  local -a extra_domains=()
+  read -r -a extra_domains <<< "${EXTRA_DOMAINS_CSV:-}"
+  for domain in "${extra_domains[@]}"; do
+    domain="$(trim_csv_value "$domain")"
+    [[ -z "$domain" ]] && continue
+    [[ -n "${seen[$domain]:-}" ]] && continue
+    _out+=("$domain")
+    seen["$domain"]=1
+  done
+}
+
+add_certbot_domains() {
+  local -n _cmd="$1"
+  local domain="$2"
+  local -A added=()
+  local san
+
+  for san in "$domain" "*.$domain"; do
+    [[ -n "${added[$san]:-}" ]] && continue
+    _cmd+=(-d "$san")
+    added["$san"]=1
+  done
+
+  local IFS=','
+  local -a regions=()
+  local region
   read -r -a regions <<< "${REGION_WILDCARDS_CSV:-}"
   for region in "${regions[@]}"; do
-    region="$(echo "$region" | xargs)"
+    region="$(trim_csv_value "$region")"
     [[ -z "$region" ]] && continue
-    cmd+=(-d "*.${region}.${PRIMARY_DOMAIN}")
+    san="*.${region}.${domain}"
+    [[ -n "${added[$san]:-}" ]] && continue
+    _cmd+=(-d "$san")
+    added["$san"]=1
+  done
+}
+
+run_issue() {
+  local -a cmd domains
+  cmd=(certbot certonly --cert-name "${PRIMARY_DOMAIN}" --dns-cloudflare --dns-cloudflare-credentials "${CLOUDFLARE_CREDENTIALS}" --dns-cloudflare-propagation-seconds "${DNS_PROPAGATION_SECONDS:-60}")
+  build_domain_list domains
+  local domain
+  for domain in "${domains[@]}"; do
+    add_certbot_domains cmd "$domain"
   done
   "${cmd[@]}"
 }

@@ -54,7 +54,7 @@ This repository keeps the existing Bash workflow and improves safety, docs, and 
 - Root access
 - Nginx on nodes
 - SSH connectivity from main to nodes
-- Cloudflare-managed DNS for your zone
+- Cloudflare-managed DNS for every zone included in the certificate
 
 Installed automatically by `install.sh`:
 
@@ -107,6 +107,7 @@ Installer flow:
 2. Installs Certbot + Cloudflare plugin
 3. Collects:
    - primary domain (example: `example.com`)
+   - optional extra primary domains (example: `example.net,example.org`)
    - DNS propagation wait seconds
    - target cert path for nodes
    - optional regional wildcard prefixes (example: `region1,region2`)
@@ -134,10 +135,12 @@ Installer flow:
 
 ## Cloudflare API Token
 
-Required minimum permissions:
+Required minimum permissions for every zone used by `PRIMARY_DOMAIN` and `EXTRA_DOMAINS_CSV`:
 
 - `Zone -> DNS -> Edit`
 - `Zone -> Zone -> Read`
+
+All domains in the certificate must be hosted in Cloudflare or otherwise accessible through the same Cloudflare API token. For example, a certificate covering `example.com`, `example.net`, and `example.org` requires token access to all three zones.
 
 Token file location on main:
 
@@ -169,6 +172,28 @@ ssl-renewal cloudflare-help
 ssl-renewal doctor
 ssl-renewal issue
 ```
+
+---
+
+## Multi-domain wildcard certificates
+
+SSL Renewal keeps `PRIMARY_DOMAIN` as the certificate name and default domain for backward compatibility. You can add more primary domains with `EXTRA_DOMAINS_CSV`.
+
+For every domain in `PRIMARY_DOMAIN` plus `EXTRA_DOMAINS_CSV`, `ssl-renewal issue` requests:
+
+- the base domain, such as `example.com`
+- the direct wildcard, such as `*.example.com`
+- every regional wildcard from `REGION_WILDCARDS_CSV`, such as `*.de.example.com`
+
+Example `/etc/ssl-renewal/config.env` values:
+
+```bash
+PRIMARY_DOMAIN="example.com"
+EXTRA_DOMAINS_CSV="example.net,example.org"
+REGION_WILDCARDS_CSV="de,sk,us"
+```
+
+The certificate remains named after `PRIMARY_DOMAIN` (`--cert-name example.com`), while the SAN list also includes `example.net` and `example.org` with their wildcard and regional wildcard names. Empty `EXTRA_DOMAINS_CSV` keeps the original single-domain behavior.
 
 ---
 
