@@ -42,6 +42,58 @@ Using `wget`:
 wget -qO- https://raw.githubusercontent.com/indie-master/SSL-Renewal/main/bootstrap.sh | sudo bash -s -- https://github.com/indie-master/SSL-Renewal.git node
 ```
 
+
+## After install: what to do next
+
+### Main server
+
+1. Check paths:
+   ```bash
+   ssl-renewal paths
+   ```
+2. Configure:
+   ```bash
+   ssl-renewal edit-config
+   ```
+3. Add Cloudflare token:
+   ```bash
+   nano /root/.secrets/certbot/cloudflare.ini
+   chmod 600 /root/.secrets/certbot/cloudflare.ini
+   ```
+4. Add nodes:
+   ```bash
+   nano /etc/ssl-renewal/nodes.txt
+   ```
+5. Check:
+   ```bash
+   ssl-renewal doctor
+   ```
+6. Issue certificate:
+   ```bash
+   ssl-renewal issue
+   ```
+7. Deploy:
+   ```bash
+   ssl-renewal deploy
+   ```
+8. Dry-run:
+   ```bash
+   ssl-renewal dry-run
+   ```
+
+### Node server
+
+- Run the installer as `node`.
+- Ensure nginx uses the certificate paths managed by main:
+  ```nginx
+  ssl_certificate     /etc/letsencrypt/live/<PRIMARY_DOMAIN>/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/<PRIMARY_DOMAIN>/privkey.pem;
+  ```
+- Test and reload nginx:
+  ```bash
+  nginx -t && systemctl reload nginx
+  ```
+
 ## Architecture
 
 ```text
@@ -188,11 +240,11 @@ chmod 600 /root/.secrets/certbot/cloudflare.ini
 
 ### Flow A: token provided during install
 
-Choose **yes** when installer asks `Add Cloudflare API Token now?`.
+Choose **yes** when installer asks `Add Cloudflare API Token now?`. If `/root/.secrets/certbot/cloudflare.ini` already contains a real token, the installer keeps it unchanged and prints `Existing Cloudflare credentials found, keeping them.`. Replacing an existing real token requires explicit confirmation and creates a timestamped backup such as `/root/.secrets/certbot/cloudflare.ini.bak.YYYYMMDD-HHMMSS` before writing the new token.
 
 ### Flow B: token added after install
 
-Choose **no** during install; placeholder file will be created and installation continues.
+Choose **no** during install; a placeholder file will be created only when credentials do not already exist. Existing real credentials are preserved.
 
 Then set token later:
 
@@ -222,10 +274,10 @@ Example `/etc/ssl-renewal/config.env` values:
 ```bash
 PRIMARY_DOMAIN="example.com"
 EXTRA_DOMAINS_CSV="example.net,example.org"
-REGION_WILDCARDS_CSV="de,sk,us"
+REGION_WILDCARDS_CSV="de,sk,us,msk"
 ```
 
-The certificate remains named after `PRIMARY_DOMAIN` (`--cert-name example.com`), while the SAN list also includes `example.net` and `example.org` with their wildcard and regional wildcard names. Empty `EXTRA_DOMAINS_CSV` keeps the original single-domain behavior.
+The certificate remains named after `PRIMARY_DOMAIN` (`--cert-name example.com`), while the SAN list also includes `example.net` and `example.org` with their wildcard and regional wildcard names. CSV values are trimmed, empty values are ignored, and duplicate `-d` entries are avoided. Empty `EXTRA_DOMAINS_CSV` keeps the original single-domain behavior. The Cloudflare token must have access to every DNS zone used by these domains.
 
 ---
 
@@ -276,6 +328,7 @@ ssl-renewal patch-nginx
 ssl-renewal patch-nginx --apply
 ssl-renewal disable-node-renew
 ssl-renewal cloudflare-help
+ssl-renewal cleanup-legacy-hooks
 ```
 
 ---

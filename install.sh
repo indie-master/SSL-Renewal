@@ -185,6 +185,68 @@ Required permissions:
 EOF2
 }
 
+cloudflare_ini_has_placeholder() {
+  local cf_ini="$1"
+  [[ -f "$cf_ini" ]] && grep -Eq 'PUT_YOUR_TOKEN_HERE|YOUR_TOKEN' "$cf_ini"
+}
+
+cloudflare_ini_has_real_token() {
+  local cf_ini="$1"
+  [[ -f "$cf_ini" ]] && ! cloudflare_ini_has_placeholder "$cf_ini"
+}
+
+write_cloudflare_token_file() {
+  local cf_ini="$1" token="$2"
+  if [[ -f "$cf_ini" ]]; then
+    local backup
+    backup="${cf_ini}.bak.$(date '+%Y%m%d-%H%M%S')"
+    cp -a "$cf_ini" "$backup"
+    say "Backed up existing Cloudflare credentials to ${backup}"
+  fi
+  printf 'dns_cloudflare_api_token = %s\n' "$token" > "$cf_ini"
+  chmod 600 "$cf_ini"
+}
+
+write_cloudflare_placeholder_if_missing() {
+  local cf_ini="$1"
+  if [[ -f "$cf_ini" ]]; then
+    if cloudflare_ini_has_real_token "$cf_ini"; then
+      say "Existing Cloudflare credentials found, keeping them."
+    else
+      warn "Existing Cloudflare credentials still contain placeholders; keeping placeholder file."
+      chmod 600 "$cf_ini"
+    fi
+    return 0
+  fi
+  cat > "$cf_ini" <<'EOF2'
+dns_cloudflare_api_token = PUT_YOUR_TOKEN_HERE
+EOF2
+  chmod 600 "$cf_ini"
+}
+
+configure_cloudflare_credentials() {
+  local cf_ini="$1" cf_token
+  if [[ -f "$cf_ini" ]] && cloudflare_ini_has_real_token "$cf_ini"; then
+    say "Existing Cloudflare credentials found, keeping them."
+    if prompt_yes_no "Replace existing Cloudflare API Token?" "N"; then
+      prompt_yes_no "Confirm replacement and backup of ${cf_ini}?" "N" || die "Cloudflare token replacement cancelled."
+      cf_token="$(prompt_secret 'Cloudflare API Token')"
+      [[ -n "$cf_token" ]] || die "Cloudflare API Token is required when replacing credentials."
+      write_cloudflare_token_file "$cf_ini" "$cf_token"
+    fi
+    return 0
+  fi
+
+  if prompt_yes_no "Add Cloudflare API Token now?" "Y"; then
+    cf_token="$(prompt_secret 'Cloudflare API Token')"
+    [[ -n "$cf_token" ]] || die "Cloudflare API Token is required when immediate setup is selected."
+    write_cloudflare_token_file "$cf_ini" "$cf_token"
+  else
+    warn "Token skipped for now. Certificate issuance will be skipped until token is set."
+    write_cloudflare_placeholder_if_missing "$cf_ini"
+  fi
+}
+
 write_main_config() {
   local domain="$1" extra_domains_csv="$2" propagation="$3" target_dir="$4" cf_ini="$5" telegram_enabled="$6" bot_token="$7" chat_id="$8" region_csv="$9"
   mkdir -p "${ETC_DIR}" "${APP_DIR}" "${APP_DIR}/logs"
@@ -319,7 +381,7 @@ EOF2
 main_install_flow() {
   ensure_certbot_main
 
-  local domain extra_domains_csv propagation target_dir region_csv cf_token cf_ini telegram_enabled="0" bot_token="" chat_id=""
+  local domain extra_domains_csv propagation target_dir region_csv cf_ini telegram_enabled="0" bot_token="" chat_id=""
   domain="$(prompt_default 'Primary domain' 'example.com')"
   extra_domains_csv="$(prompt_default 'Extra primary domains, comma-separated, optional' '')"
   propagation="$(prompt_default 'DNS propagation seconds for Cloudflare' '60')"
@@ -368,7 +430,7 @@ EOF2
     rm -f "${APP_DIR}/.disable_nodes_after_first_deploy"
   fi
 
-  if grep -q 'PUT_YOUR_TOKEN_HERE' "$cf_ini"; then
+  if cloudflare_ini_has_placeholder "$cf_ini"; then
     warn "Cloudflare token is not configured yet; skipping certificate issuance."
     cat <<EOF2
 

@@ -45,6 +45,16 @@ fi
 REPO_URL="$1"
 ROLE="$2"
 
+case "$REPO_URL" in
+  https://github.com/*/*.git|https://github.com/*/*)
+    ;;
+  *)
+    echo "Error: repo_url must be an https://github.com/<owner>/<repo>[.git] URL." >&2
+    usage
+    exit 1
+    ;;
+esac
+
 case "$ROLE" in
   main|node) ;;
   *)
@@ -73,9 +83,18 @@ SSL Renewal bootstrap finished for role: ${ROLE}
 
 Next steps:
   1. Review installer output above for any deferred manual steps.
-  2. On main servers, run: ssl-renewal doctor
-  3. On main servers, run: ssl-renewal status
-  4. If certificates are ready, run: ssl-renewal deploy
+  Main server:
+    ssl-renewal paths
+    ssl-renewal edit-config
+    ssl-renewal doctor
+    ssl-renewal issue
+    ssl-renewal deploy
+    ssl-renewal dry-run
+
+  Node server:
+    ensure nginx uses /etc/letsencrypt/live/<PRIMARY_DOMAIN>/fullchain.pem
+    and /etc/letsencrypt/live/<PRIMARY_DOMAIN>/privkey.pem, then run:
+    nginx -t && systemctl reload nginx
 
 Security note:
   Review bootstrap.sh before running remote shell commands:

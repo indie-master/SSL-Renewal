@@ -7,10 +7,7 @@ echo "Running bash syntax checks..."
 bash -n install.sh
 bash -n bootstrap.sh
 bash -n smoke-test.sh
-for f in scripts/*.sh; do
-  echo "  bash -n $f"
-  bash -n "$f"
-done
+bash -n scripts/*.sh
 bash -n scripts/ssl-renewal
 
 echo "Running pre-install CLI checks..."
@@ -21,6 +18,12 @@ cloudflare_output="$(bash scripts/ssl-renewal cloudflare-help)"
 [[ "$help_output" != *"lib.sh not found"* ]] || { echo "help hit lib.sh load error" >&2; exit 1; }
 [[ "$cloudflare_output" != *"lib.sh not found"* ]] || { echo "cloudflare-help hit lib.sh load error" >&2; exit 1; }
 
+
+echo "Checking forbidden runtime Telegram URL-encoded newlines..."
+if rg -n '%0A' scripts install.sh bootstrap.sh; then
+  echo "Found forbidden %0A in runtime scripts" >&2
+  exit 1
+fi
 
 echo "Checking multi-domain configuration support..."
 [[ "$(< install.sh)" == *"EXTRA_DOMAINS_CSV"* ]] || { echo "install.sh missing EXTRA_DOMAINS_CSV" >&2; exit 1; }

@@ -160,3 +160,33 @@ run_issue() {
   done
   "${cmd[@]}"
 }
+
+cleanup_legacy_hooks() {
+  local timestamp backup_root backup_dir legacy_dir hook_root hook
+  timestamp="$(date '+%Y%m%d-%H%M%S')"
+  backup_root="/root/old-certs-sync-backup"
+  backup_dir="${backup_root}/certs-sync.${timestamp}"
+  legacy_dir="/opt/certs-sync"
+  hook_root="/etc/letsencrypt/renewal-hooks"
+
+  mkdir -p "$backup_dir/hooks"
+
+  if [[ -e "$legacy_dir" ]]; then
+    cp -a "$legacy_dir" "$backup_dir/"
+    mv "$legacy_dir" "/opt/certs-sync.disabled.${timestamp}"
+    echo "Backed up and disabled ${legacy_dir}: ${backup_dir}/certs-sync"
+  else
+    echo "No ${legacy_dir} directory found."
+  fi
+
+  if [[ -d "$hook_root" ]]; then
+    while IFS= read -r -d '' hook; do
+      [[ "$hook" == "/etc/letsencrypt/renewal-hooks/deploy/ssl-renewal-deploy.sh" ]] && continue
+      mkdir -p "${backup_dir}/hooks/$(dirname "${hook#${hook_root}/}")"
+      mv "$hook" "${backup_dir}/hooks/${hook#${hook_root}/}"
+      echo "Moved legacy hook to backup: $hook"
+    done < <(find "$hook_root" -type f ! -path '/etc/letsencrypt/renewal-hooks/deploy/ssl-renewal-deploy.sh' -print0 | xargs -0 -r grep -ElZ '/opt/certs-sync|certs-sync' || true)
+  fi
+
+  echo "Legacy cleanup complete. Backup directory: ${backup_dir}"
+}
