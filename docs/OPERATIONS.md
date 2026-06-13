@@ -24,11 +24,28 @@
    ssl-renewal issue
    ```
 
-5. Deploy the updated certificate to nodes:
+5. If dry-run fails with `NXDOMAIN` for newly added wildcard domains, increase `DNS_PROPAGATION_SECONDS` to `180` or `300`. Existing Certbot renewal files may also need `dns_cloudflare_propagation_seconds = 180`; this is usually Cloudflare/Let's Encrypt secondary DNS validation timing.
+6. Deploy the updated certificate to nodes:
 
    ```bash
    ssl-renewal deploy
    ```
+
+
+## Disable old `/opt/certs-sync` hooks safely
+
+Use the built-in helper on the main server:
+
+```bash
+ssl-renewal cleanup-legacy-hooks
+```
+
+The helper does not delete legacy files without a backup. It:
+
+- backs up `/opt/certs-sync` to `/root/old-certs-sync-backup/certs-sync.TIMESTAMP` when it exists
+- moves old hooks under `/etc/letsencrypt/renewal-hooks` that reference `/opt/certs-sync` or `certs-sync` into that backup
+- renames `/opt/certs-sync` to `/opt/certs-sync.disabled.TIMESTAMP`
+- leaves `/etc/letsencrypt/renewal-hooks/deploy/ssl-renewal-deploy.sh` intact
 
 ## Disable local renewals on nodes
 

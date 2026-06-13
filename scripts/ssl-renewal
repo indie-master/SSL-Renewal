@@ -41,6 +41,7 @@ Usage:
   ssl-renewal patch-nginx [--apply]
   ssl-renewal disable-node-renew
   ssl-renewal cloudflare-help
+  ssl-renewal cleanup-legacy-hooks
 USAGE
 }
 
@@ -89,7 +90,17 @@ do_reload() { systemctl reload nginx; echo "nginx reloaded"; }
 do_issue() { ensure_config_loaded; require_role_main; run_issue; }
 do_dry_run() { ensure_config_loaded; require_role_main; certbot renew --dry-run; }
 do_deploy() { ensure_config_loaded; require_role_main; /opt/ssl-renewal/deploy-certs.sh; }
-do_notify_test() { ensure_config_loaded; notify_tg "✅ <b>SSL Renewal</b>%0AHost: <code>$(hostname -f 2>/dev/null || hostname)</code>%0AMessage: test notification"; echo "Notification requested"; }
+do_notify_test() {
+  ensure_config_loaded
+  notify_tg "$(cat <<EOF2
+✅ <b>SSL Renewal</b>
+
+🖥 Host: <code>$(hostname -f 2>/dev/null || hostname)</code>
+💬 Message: test notification
+EOF2
+)"
+  echo "Notification requested"
+}
 
 do_doctor() {
   ensure_config_loaded
@@ -103,6 +114,7 @@ do_doctor() {
 do_edit_config() { ensure_config_loaded; "${EDITOR:-nano}" /etc/ssl-renewal/config.env; }
 do_patch_nginx() { /opt/ssl-renewal/node-nginx-patch.sh "$@"; }
 do_disable_node_renew() { /opt/ssl-renewal/node-prep.sh --disable-renew-only; }
+do_cleanup_legacy_hooks() { ensure_config_loaded; cleanup_legacy_hooks; }
 
 do_cloudflare_help() {
   local primary_domain="${PRIMARY_DOMAIN:-example.com}"
@@ -150,5 +162,6 @@ case "$cmd" in
   paths) ensure_config_loaded; show_paths ;;
   patch-nginx) do_patch_nginx "$@" ;;
   disable-node-renew) do_disable_node_renew ;;
+  cleanup-legacy-hooks) do_cleanup_legacy_hooks ;;
   *) echo "Unknown command: $cmd" >&2; usage; exit 1 ;;
 esac

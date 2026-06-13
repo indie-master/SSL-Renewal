@@ -87,9 +87,22 @@ if [[ -f "${APP_DIR}/.disable_nodes_after_first_deploy" ]]; then
 fi
 
 if [[ ${#FAIL_NODES[@]} -gt 0 ]]; then
-  notify "⚠️ <b>SSL Renewal deploy finished with errors</b>%0AHost: <code>$(hostname -f 2>/dev/null || hostname)</code>%0AOK: ${#OK_NODES[@]}%0AFAIL: ${#FAIL_NODES[@]}"
+  notify "$(cat <<EOF2
+⚠️ <b>SSL Renewal deploy finished with errors</b>
+
+🖥 Host: <code>$(hostname -f 2>/dev/null || hostname)</code>
+✅ OK: ${#OK_NODES[@]}
+❌ FAIL: ${#FAIL_NODES[@]}
+EOF2
+)"
   exit 1
 fi
 
-notify "✅ <b>SSL Renewal deploy successful</b>%0AHost: <code>$(hostname -f 2>/dev/null || hostname)</code>%0ANodes updated: ${#OK_NODES[@]}"
+notify "$(cat <<EOF2
+✅ <b>SSL Renewal deploy successful</b>
+
+🖥 Host: <code>$(hostname -f 2>/dev/null || hostname)</code>
+📦 Nodes updated: ${#OK_NODES[@]}
+EOF2
+)"
 log "=== DEPLOY END ==="
