@@ -5,7 +5,7 @@ load_config() {
   [[ -f "$cfg" ]] || { echo "Config not found: $cfg" >&2; return 1; }
   # shellcheck disable=SC1090
   source "$cfg"
-  export ROLE APP_DIR ETC_DIR PRIMARY_DOMAIN EXTRA_DOMAINS_CSV TARGET_DIR CERT_DIR LOG_DIR TELEGRAM_ENABLED TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID NODES_FILE DNS_PROPAGATION_SECONDS CLOUDFLARE_CREDENTIALS REGION_WILDCARDS_CSV
+  export ROLE APP_DIR ETC_DIR PRIMARY_DOMAIN EXTRA_DOMAINS_CSV CERT_NAME TARGET_DIR CERT_DIR LOG_DIR TELEGRAM_ENABLED TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID TELEGRAM_MESSAGE_THREAD_ID NODES_FILE DNS_PROPAGATION_SECONDS CLOUDFLARE_CREDENTIALS REGION_WILDCARDS_CSV
 }
 
 banner() {
@@ -59,6 +59,7 @@ ROLE=${ROLE:-unknown}
 APP_DIR=${APP_DIR:-}
 ETC_DIR=${ETC_DIR:-}
 PRIMARY_DOMAIN=${PRIMARY_DOMAIN:-}
+CERT_NAME=${CERT_NAME:-${PRIMARY_DOMAIN:-}}
 EXTRA_DOMAINS_CSV=${EXTRA_DOMAINS_CSV:-}
 TARGET_DIR=${TARGET_DIR:-}
 CERT_DIR=${CERT_DIR:-}
@@ -152,12 +153,23 @@ add_certbot_domains() {
 
 run_issue() {
   local -a cmd domains
-  cmd=(certbot certonly --cert-name "${PRIMARY_DOMAIN}" --dns-cloudflare --dns-cloudflare-credentials "${CLOUDFLARE_CREDENTIALS}" --dns-cloudflare-propagation-seconds "${DNS_PROPAGATION_SECONDS:-60}")
+  local cert_name="${CERT_NAME:-${PRIMARY_DOMAIN}}"
+
+  cmd=(
+    certbot certonly
+    --cert-name "${cert_name}"
+    --dns-cloudflare
+    --dns-cloudflare-credentials "${CLOUDFLARE_CREDENTIALS}"
+    --dns-cloudflare-propagation-seconds "${DNS_PROPAGATION_SECONDS:-60}"
+  )
+
   build_domain_list domains
+
   local domain
   for domain in "${domains[@]}"; do
     add_certbot_domains cmd "$domain"
   done
+
   "${cmd[@]}"
 }
 
