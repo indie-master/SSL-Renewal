@@ -261,7 +261,7 @@ ssl-renewal issue
 
 ## Multi-domain wildcard certificates
 
-SSL Renewal keeps `PRIMARY_DOMAIN` as the certificate name and default domain for backward compatibility. You can add more primary domains with `EXTRA_DOMAINS_CSV`.
+SSL Renewal separates the first certificate domain from the Certbot lineage. `PRIMARY_DOMAIN` is the first SAN requested (and is normally used as the certificate CN), while `CERT_NAME` controls Certbot's `--cert-name` and therefore the stable lineage/path under `/etc/letsencrypt/live/`. If `CERT_NAME` is omitted, it falls back to `PRIMARY_DOMAIN` for backward compatibility. You can add more domains with `EXTRA_DOMAINS_CSV`.
 
 For every domain in `PRIMARY_DOMAIN` plus `EXTRA_DOMAINS_CSV`, `ssl-renewal issue` requests:
 
@@ -272,12 +272,34 @@ For every domain in `PRIMARY_DOMAIN` plus `EXTRA_DOMAINS_CSV`, `ssl-renewal issu
 Example `/etc/ssl-renewal/config.env` values:
 
 ```bash
-PRIMARY_DOMAIN="example.com"
-EXTRA_DOMAINS_CSV="example.net,example.org"
+PRIMARY_DOMAIN="example.net"
+CERT_NAME="example.com"
+EXTRA_DOMAINS_CSV="example.com,example.org"
 REGION_WILDCARDS_CSV="de,sk,us,msk"
 ```
 
-The certificate remains named after `PRIMARY_DOMAIN` (`--cert-name example.com`), while the SAN list also includes `example.net` and `example.org` with their wildcard and regional wildcard names. CSV values are trimmed, empty values are ignored, and duplicate `-d` entries are avoided. Empty `EXTRA_DOMAINS_CSV` keeps the original single-domain behavior. The Cloudflare token must have access to every DNS zone used by these domains.
+In the example above, Certbot keeps the existing lineage `example.com` and the files remain under `/etc/letsencrypt/live/example.com/`, while `example.net` is requested first and the SAN list also includes `example.com` and `example.org` with their wildcard and regional wildcard names. CSV values are trimmed, empty values are ignored, and duplicate `-d` entries are avoided. The Cloudflare token must have access to every DNS zone used by these domains.
+
+---
+
+## Telegram forum topics
+
+Telegram notifications can be sent either to a normal chat/supergroup or to a specific forum topic.
+
+For a normal chat, configure only:
+
+```bash
+TELEGRAM_CHAT_ID="-1001234567890"
+```
+
+For a forum topic, also set the real Telegram `message_thread_id`:
+
+```bash
+TELEGRAM_CHAT_ID="-1001234567890"
+TELEGRAM_MESSAGE_THREAD_ID="123"
+```
+
+The thread ID is not the visual position of the topic. To discover it, send a message to the target topic and inspect the Bot API `getUpdates` response for `message_thread_id`. If `TELEGRAM_MESSAGE_THREAD_ID` is empty or omitted, notifications are sent to the chat's General topic/default conversation.
 
 ---
 

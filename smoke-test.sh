@@ -28,6 +28,12 @@ fi
 echo "Checking multi-domain configuration support..."
 [[ "$(< install.sh)" == *"EXTRA_DOMAINS_CSV"* ]] || { echo "install.sh missing EXTRA_DOMAINS_CSV" >&2; exit 1; }
 [[ "$(< scripts/lib.sh)" == *"EXTRA_DOMAINS_CSV"* ]] || { echo "scripts/lib.sh missing EXTRA_DOMAINS_CSV" >&2; exit 1; }
+[[ "$(< install.sh)" == *"CERT_NAME"* ]] || { echo "install.sh missing CERT_NAME" >&2; exit 1; }
+[[ "$(< scripts/lib.sh)" == *"CERT_NAME"* ]] || { echo "scripts/lib.sh missing CERT_NAME" >&2; exit 1; }
+
+echo "Checking Telegram forum topic support..."
+[[ "$(< install.sh)" == *"TELEGRAM_MESSAGE_THREAD_ID"* ]] || { echo "install.sh missing TELEGRAM_MESSAGE_THREAD_ID" >&2; exit 1; }
+[[ "$(< scripts/telegram-notify.sh)" == *"message_thread_id"* ]] || { echo "telegram-notify.sh missing message_thread_id support" >&2; exit 1; }
 
 echo "Checking executable bits..."
 for f in install.sh smoke-test.sh scripts/*.sh scripts/ssl-renewal bootstrap.sh; do

@@ -248,16 +248,17 @@ configure_cloudflare_credentials() {
 }
 
 write_main_config() {
-  local domain="$1" extra_domains_csv="$2" propagation="$3" target_dir="$4" cf_ini="$5" telegram_enabled="$6" bot_token="$7" chat_id="$8" region_csv="$9"
+  local domain="$1" cert_name="$2" extra_domains_csv="$3" propagation="$4" target_dir="$5" cf_ini="$6" telegram_enabled="$7" bot_token="$8" chat_id="$9" thread_id="${10}" region_csv="${11}"
   mkdir -p "${ETC_DIR}" "${APP_DIR}" "${APP_DIR}/logs"
   cat > "${ETC_DIR}/config.env" <<EOF2
 ROLE="main"
 APP_DIR="${APP_DIR}"
 ETC_DIR="${ETC_DIR}"
 PRIMARY_DOMAIN="${domain}"
+CERT_NAME="${cert_name}"
 EXTRA_DOMAINS_CSV="${extra_domains_csv}"
 TARGET_DIR="${target_dir}"
-CERT_DIR="/etc/letsencrypt/live/${domain}"
+CERT_DIR="/etc/letsencrypt/live/${cert_name}"
 CLOUDFLARE_CREDENTIALS="${cf_ini}"
 DNS_PROPAGATION_SECONDS="${propagation}"
 REGION_WILDCARDS_CSV="${region_csv}"
@@ -266,6 +267,7 @@ LOG_DIR="${APP_DIR}/logs"
 TELEGRAM_ENABLED="${telegram_enabled}"
 TELEGRAM_BOT_TOKEN="${bot_token}"
 TELEGRAM_CHAT_ID="${chat_id}"
+TELEGRAM_MESSAGE_THREAD_ID="${thread_id}"
 EOF2
   chmod 600 "${ETC_DIR}/config.env"
 }
@@ -318,11 +320,11 @@ trim_csv_value() {
 }
 
 issue_main_certificate() {
-  local domain="$1" extra_domains_csv="$2" propagation="$3" cf_ini="$4" region_csv="$5"
+  local domain="$1" cert_name="$2" extra_domains_csv="$3" propagation="$4" cf_ini="$5" region_csv="$6"
   local -a cmd domains extra_domains regions
   local -A seen_domains=() added_sans=()
   local item region san
-  cmd=(certbot certonly --cert-name "$domain" --dns-cloudflare --dns-cloudflare-credentials "$cf_ini" --dns-cloudflare-propagation-seconds "$propagation")
+  cmd=(certbot certonly --cert-name "$cert_name" --dns-cloudflare --dns-cloudflare-credentials "$cf_ini" --dns-cloudflare-propagation-seconds "$propagation")
   item="$(trim_csv_value "$domain")"
   if [[ -n "$item" ]]; then
     domains+=("$item")
@@ -381,11 +383,12 @@ EOF2
 main_install_flow() {
   ensure_certbot_main
 
-  local domain extra_domains_csv propagation target_dir region_csv cf_ini telegram_enabled="0" bot_token="" chat_id=""
-  domain="$(prompt_default 'Primary domain' 'example.com')"
+  local domain cert_name extra_domains_csv propagation target_dir region_csv cf_ini telegram_enabled="0" bot_token="" chat_id="" thread_id=""
+  domain="$(prompt_default 'Primary domain (first SAN / preferred certificate name)' 'example.com')"
+  cert_name="$(prompt_default 'Certbot certificate name / lineage' "$domain")"
   extra_domains_csv="$(prompt_default 'Extra primary domains, comma-separated, optional' '')"
   propagation="$(prompt_default 'DNS propagation seconds for Cloudflare' '60')"
-  target_dir="$(prompt_default 'Certificate path used on nodes' "/etc/letsencrypt/live/${domain}")"
+  target_dir="$(prompt_default 'Certificate path used on nodes' "/etc/letsencrypt/live/${cert_name}")"
   region_csv="$(prompt_default 'Regional wildcard prefixes (comma-separated, e.g. region1,region2)' 'region1,region2')"
 
   echo
@@ -414,9 +417,10 @@ EOF2
     telegram_enabled="1"
     bot_token="$(prompt_default 'Telegram bot token' '')"
     chat_id="$(prompt_default 'Telegram chat ID' '')"
+    thread_id="$(prompt_default 'Telegram message thread ID (optional, for forum topics)' '')"
   fi
 
-  write_main_config "$domain" "$extra_domains_csv" "$propagation" "$target_dir" "$cf_ini" "$telegram_enabled" "$bot_token" "$chat_id" "$region_csv"
+  write_main_config "$domain" "$cert_name" "$extra_domains_csv" "$propagation" "$target_dir" "$cf_ini" "$telegram_enabled" "$bot_token" "$chat_id" "$thread_id" "$region_csv"
   install_runtime_files
 
   collect_nodes > "${ETC_DIR}/nodes.txt"
@@ -444,7 +448,7 @@ Next steps:
      ssl-renewal deploy
 EOF2
   else
-    issue_main_certificate "$domain" "$extra_domains_csv" "$propagation" "$cf_ini" "$region_csv"
+    issue_main_certificate "$domain" "$cert_name" "$extra_domains_csv" "$propagation" "$cf_ini" "$region_csv"
   fi
 
   if [[ -s "${ETC_DIR}/nodes.txt" ]] && prompt_yes_no "Deploy certificates to nodes now?" "Y"; then
